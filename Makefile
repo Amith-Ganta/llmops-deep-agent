@@ -32,6 +32,8 @@ docker-run:
 
 kind-up:
 	kind create cluster --config k8s/kind-config.yaml
+	kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+	kubectl -n kube-system patch deployment metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
 
 kind-load:
 	kind load docker-image $(IMAGE):$(TAG) --name llmops
