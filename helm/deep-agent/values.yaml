@@ -1,0 +1,50 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/amith-ganta/llmops-deep-agent
+  tag: latest
+  # kind-loaded images are not pullable from a registry; IfNotPresent uses the loaded copy
+  pullPolicy: IfNotPresent
+
+# Kubernetes Secret holding GROQ_API_KEY / TAVILY_API_KEY / LANGFUSE_* keys.
+# Created out-of-band:  kubectl create secret generic deep-agent-secrets --from-env-file=.env
+existingSecret: deep-agent-secrets
+
+# Non-secret agent configuration, rendered into a ConfigMap
+config:
+  DEEPAGENT_MODEL: "groq:llama-3.3-70b-versatile"
+  SUBAGENT_MODEL: "groq:llama-3.1-8b-instant"
+  DEEPAGENT_BACKEND: "StateBackend"
+  ENABLE_WEB_SEARCH: "true"
+  ENABLE_SUBAGENTS: "true"
+  EAGER_INIT: "true"
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8000
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 70
+
+probes:
+  liveness:
+    path: /health
+    initialDelaySeconds: 10
+    periodSeconds: 15
+  readiness:
+    path: /ready
+    initialDelaySeconds: 15
+    periodSeconds: 10
+    failureThreshold: 6

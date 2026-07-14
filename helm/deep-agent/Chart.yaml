@@ -1,0 +1,6 @@
+apiVersion: v2
+name: deep-agent
+description: Deep agent API (deepagents + LangGraph) served with FastAPI and traced with Langfuse
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

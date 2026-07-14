@@ -1,0 +1,12 @@
+{{ .Chart.Name }} deployed as release "{{ .Release.Name }}".
+
+Check rollout:
+  kubectl rollout status deployment/{{ include "deep-agent.fullname" . }}
+
+Port-forward and try it:
+  kubectl port-forward svc/{{ include "deep-agent.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://localhost:8080/health
+  curl -X POST http://localhost:8080/chat -H "Content-Type: application/json" -d "{\"message\": \"hello\"}"
+
+Reminder: this chart expects a Secret named "{{ .Values.existingSecret }}":
+  kubectl create secret generic {{ .Values.existingSecret }} --from-env-file=.env
