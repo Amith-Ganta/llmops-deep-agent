@@ -67,6 +67,21 @@ kubectl port-forward svc/deep-agent 8080:80
 curl -X POST localhost:8080/chat -H "Content-Type: application/json" -d '{"message":"What is RAG?"}'
 ```
 
+## Frontend (Streamlit)
+
+A chat UI that talks to the API over HTTP — it works against any of the three run modes above
+(local uvicorn, Docker, or a Kubernetes port-forward):
+
+```bash
+make frontend               # installs streamlit + requests, serves on :8501
+```
+
+Point the sidebar's **API URL** at wherever the service is listening (`http://localhost:8000`
+for local/Docker, `http://localhost:8080` through the kind port-forward). The sidebar shows the
+service's live `/health`, `/ready`, and `/info` state; every answer displays its latency and
+Langfuse trace ID. The UI holds no secrets and never touches the LLM directly — it is a pure
+HTTP client, so the API stays the single deployable unit.
+
 ## Evaluation gate (DeepEval)
 
 `evals/` runs the **real agent in-process** against a golden dataset and judges every answer with
@@ -147,6 +162,7 @@ All knobs are env vars (12-factor), defaults in [app/settings.py](app/settings.p
 ```
 app/        FastAPI service: routes, settings, Langfuse wiring, agent runtime
 core/       the deep agent: graph builder, backends, tools
+frontend/   Streamlit chat UI — pure HTTP client of the API
 config/     AGENTS.md — persistent agent memory
 skills/     agent skills (progressive disclosure)
 tests/      unit tests — agent stubbed, no keys needed

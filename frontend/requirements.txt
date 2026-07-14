@@ -1,0 +1,3 @@
+# Frontend only — the API service has its own requirements.txt at the repo root.
+streamlit>=1.40
+requests>=2.32

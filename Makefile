@@ -4,7 +4,7 @@
 IMAGE ?= ghcr.io/amith-ganta/llmops-deep-agent
 TAG   ?= latest
 
-.PHONY: install dev lint test evals run docker-build docker-run kind-up kind-load deploy undeploy
+.PHONY: install dev lint test evals run frontend docker-build docker-run kind-up kind-load deploy undeploy
 
 install:
 	pip install -r requirements.txt
@@ -23,6 +23,10 @@ evals:
 
 run:
 	uvicorn app.main:app --reload --port 8000
+
+frontend:
+	pip install -r frontend/requirements.txt
+	streamlit run frontend/app.py
 
 docker-build:
 	docker build -t $(IMAGE):$(TAG) .
