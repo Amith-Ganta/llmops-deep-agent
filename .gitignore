@@ -16,6 +16,9 @@ workspace/
 .deepeval-cache.json
 deepeval-results/
 
+# local handoff notes — stay on this machine
+HANDOFF.md
+
 # OS/editor
 .DS_Store
 Thumbs.db
