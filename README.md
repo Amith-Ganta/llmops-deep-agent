@@ -48,8 +48,10 @@ turn to its Langfuse trace.
 
 `model` and `backend` are optional per-request overrides, validated against the `/info` lists.
 Groq's free-tier rate limits are **per model**, so switching model when one hits its daily token
-cap is a real workaround, not just a preference. `backend` picks one of the three deepagents
-memory types:
+cap is a real workaround, not just a preference. Setting `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`
+adds OpenAI (`gpt-4o-mini`, `gpt-4.1-mini`, `gpt-4o`) and DeepSeek (`deepseek-chat`,
+`deepseek-reasoner`) models to the list automatically — models whose key is missing are never
+offered. `backend` picks one of the three deepagents memory types:
 
 | Backend | Agent files live in… | Survives restart | Shared across threads |
 |---|---|---|---|
@@ -108,9 +110,10 @@ two metrics:
 | `AnswerRelevancyMetric` | 0.6 | Did the answer actually address the question? |
 | `GEval` "Correctness" | 0.5 | Does it contain the expected facts (per-case criteria)? |
 
-The judge is **Groq `llama-3.3-70b-versatile`** via a custom `DeepEvalBaseLLM` wrapper
-(`evals/groq_judge.py`) — no OpenAI key needed anywhere in the project. Evals run with web search
-and subagents disabled so scores measure the model + prompt, not Tavily.
+The judge is a custom `DeepEvalBaseLLM` wrapper (`evals/judge.py`) that auto-selects the best
+provider from the keys available — **OpenAI `gpt-4o-mini` > DeepSeek `deepseek-chat` > Groq
+`llama-3.3-70b-versatile`** (override with `EVAL_JUDGE=provider:model`). Evals run with web
+search and subagents disabled so scores measure the model + prompt, not Tavily.
 
 ```bash
 make evals        # locally
@@ -162,13 +165,15 @@ All knobs are env vars (12-factor), defaults in [app/settings.py](app/settings.p
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `GROQ_API_KEY` | — | **required** — agent + eval judge |
+| `GROQ_API_KEY` | — | **required** — agent + fallback eval judge |
+| `OPENAI_API_KEY` / `DEEPSEEK_API_KEY` | — | optional — unlock OpenAI / DeepSeek models in the picker and as eval judge |
+| `EVAL_JUDGE` | auto by key | force the eval judge, e.g. `openai:gpt-4o` |
 | `TAVILY_API_KEY` | — | web search (agent degrades gracefully without it) |
 | `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_BASE_URL` | — | tracing (off if unset) |
 | `DEEPAGENT_MODEL` | `groq:llama-3.3-70b-versatile` | main agent model |
 | `SUBAGENT_MODEL` | `groq:llama-3.1-8b-instant` | research subagent model |
 | `DEEPAGENT_BACKEND` | `StateBackend` | default memory type: `StateBackend` \| `FilesystemBackend` \| `StoreBackend` |
-| `AVAILABLE_MODELS` | 6 Groq models | comma-separated whitelist clients may pick from per request |
+| `AVAILABLE_MODELS` | 6 Groq models + key-gated OpenAI/DeepSeek | comma-separated whitelist clients may pick from per request |
 | `ENABLE_WEB_SEARCH` / `ENABLE_SUBAGENTS` | `true` | feature flags |
 | `EAGER_INIT` | `true` | build the agent at startup (readiness gate) |
 | `SYSTEM_PROMPT` | research assistant | override the agent's instructions |
@@ -183,7 +188,7 @@ frontend/   Streamlit chat UI — pure HTTP client of the API
 config/     AGENTS.md — persistent agent memory
 skills/     agent skills (progressive disclosure)
 tests/      unit tests — agent stubbed, no keys needed
-evals/      DeepEval golden-dataset gate — real agent + Groq judge
+evals/      DeepEval golden-dataset gate — real agent + key-selected LLM judge
 helm/       Helm chart (Deployment/Service/ConfigMap/HPA)
 k8s/        kind cluster config
 ```

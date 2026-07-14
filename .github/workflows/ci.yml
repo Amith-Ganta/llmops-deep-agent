@@ -31,6 +31,9 @@ jobs:
     needs: lint-and-test
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      # Optional: when set, the eval judge auto-selects OpenAI > DeepSeek > Groq.
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +45,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: LLM eval gate (DeepEval, Groq judge)
+      - name: LLM eval gate (DeepEval, LLM judge)
         run: |
           if [ -z "$GROQ_API_KEY" ]; then
             echo "::warning::GROQ_API_KEY secret not set - eval gate SKIPPED. Run: gh secret set GROQ_API_KEY"

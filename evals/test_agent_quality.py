@@ -1,5 +1,6 @@
-"""LLM eval gate: the real deep agent answers a golden dataset in-process and a
-Groq-hosted judge (llama-3.3-70b-versatile) scores each answer.
+"""LLM eval gate: the real deep agent answers a golden dataset in-process and
+an LLM judge scores each answer. The judge auto-selects by available key —
+OpenAI > DeepSeek > Groq (see evals/judge.py; override with EVAL_JUDGE).
 
 Metrics per case:
   - AnswerRelevancyMetric (threshold 0.6): did the answer address the question?
@@ -7,7 +8,7 @@ Metrics per case:
     without contradicting them?
 
 Scores are LLM-judged evidence, not proof — reasons are attached to failures.
-Run:  pytest evals/ -v   (requires GROQ_API_KEY)
+Run:  pytest evals/ -v   (requires GROQ_API_KEY for the agent under test)
 """
 
 import pytest
@@ -16,7 +17,7 @@ from deepeval.metrics import AnswerRelevancyMetric, GEval
 from deepeval.test_case import LLMTestCase, SingleTurnParams
 
 from evals.dataset import GOLDEN_CASES
-from evals.groq_judge import GroqJudge
+from evals.judge import ChatModelJudge
 
 RELEVANCY_THRESHOLD = 0.6
 CORRECTNESS_THRESHOLD = 0.5
@@ -24,7 +25,7 @@ CORRECTNESS_THRESHOLD = 0.5
 
 @pytest.fixture(scope="session")
 def judge():
-    return GroqJudge()
+    return ChatModelJudge()
 
 
 @pytest.mark.parametrize("case", GOLDEN_CASES, ids=[c["id"] for c in GOLDEN_CASES])
