@@ -34,6 +34,9 @@ jobs:
       # Optional: when set, the eval judge auto-selects DeepSeek > OpenAI > Groq.
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      # Pin the eval agent to a model with its own Groq daily-token bucket;
+      # llama-3.3-70b's 100k TPD is shared with local dev and exhausts first.
+      DEEPAGENT_MODEL: groq:openai/gpt-oss-120b
     steps:
       - uses: actions/checkout@v4
 
