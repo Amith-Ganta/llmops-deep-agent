@@ -3,8 +3,9 @@ replicaCount: 1
 image:
   repository: ghcr.io/amith-ganta/llmops-deep-agent
   tag: latest
-  # kind-loaded images are not pullable from a registry; IfNotPresent uses the loaded copy
-  pullPolicy: IfNotPresent
+  # The GHCR package is public, so nodes pull CI-built images directly; Always
+  # makes a rollout restart pick up the newest :latest without `kind load`.
+  pullPolicy: Always
 
 # Kubernetes Secret holding GROQ_API_KEY / TAVILY_API_KEY / LANGFUSE_* keys.
 # Created out-of-band:  kubectl create secret generic deep-agent-secrets --from-env-file=.env
