@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Literal
+from typing import Any
 
 from tavily import TavilyClient
 
@@ -14,18 +14,10 @@ def build_web_search() -> tuple[Any | None, str]:
 
     client = TavilyClient(api_key=api_key)
 
-    def web_search(
-        query: str,
-        max_results: int = 5,
-        topic: Literal["general", "news", "finance", "sports"] = "general",
-        include_raw_content: bool = False,
-    ) -> dict[str, Any]:
+    # Minimal schema on purpose: llama on Groq garbles tool calls more often
+    # as the argument surface grows (it invented topic="history" once).
+    def web_search(query: str, max_results: int = 5) -> dict[str, Any]:
         """Search the web using Tavily and return results."""
-        return client.search(
-            query,
-            max_results=max_results,
-            topic=topic,
-            include_raw_content=include_raw_content,
-        )
+        return client.search(query, max_results=max_results)
 
     return web_search, "Tavily web search enabled."

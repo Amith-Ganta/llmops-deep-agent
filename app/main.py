@@ -93,6 +93,11 @@ def chat(request: ChatRequest) -> ChatResponse:
         raise
     except Exception as exc:
         logger.exception("Agent invocation failed (thread=%s)", thread_id)
+        if "rate_limit" in str(exc) or "Error code: 429" in str(exc):
+            raise HTTPException(
+                status_code=429,
+                detail="LLM provider rate limit reached (Groq free tier) — try again later.",
+            ) from exc
         raise HTTPException(status_code=500, detail=f"agent error: {exc}") from exc
     return ChatResponse(
         response=answer,

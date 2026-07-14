@@ -58,6 +58,12 @@ def extract_answer(result: dict[str, Any]) -> str:
     return str(content)
 
 
+# Groq's llama occasionally emits a syntactically broken tool call
+# ("tool_use_failed" 400) — a transient generation glitch, not a config error.
+_TRANSIENT_MARKER = "tool_use_failed"
+_MAX_ATTEMPTS = 2  # each attempt costs real tokens; retry once, then surface
+
+
 def run_agent(message: str, thread_id: str) -> str:
     """Invoke the deep agent for one user message on a conversation thread."""
     agent, _ = get_agent()
@@ -68,8 +74,18 @@ def run_agent(message: str, thread_id: str) -> str:
         "callbacks": callbacks,
         "metadata": {"langfuse_session_id": thread_id},
     }
-    result = agent.invoke(
-        {"messages": [{"role": "user", "content": message}]},
-        config=config,
-    )
-    return extract_answer(result)
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            result = agent.invoke(
+                {"messages": [{"role": "user", "content": message}]},
+                config=config,
+            )
+            return extract_answer(result)
+        except Exception as exc:
+            if _TRANSIENT_MARKER not in str(exc) or attempt == _MAX_ATTEMPTS:
+                raise
+            logger.warning(
+                "Malformed tool call from the model (thread=%s, attempt %d/%d) — retrying.",
+                thread_id, attempt, _MAX_ATTEMPTS,
+            )
+    raise RuntimeError("unreachable")  # for the type checker

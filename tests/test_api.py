@@ -68,6 +68,48 @@ def test_chat_agent_failure_is_500(monkeypatch):
     assert "model exploded" in r.json()["detail"]
 
 
+def test_chat_rate_limit_is_429(monkeypatch):
+    def limited(message, thread_id):
+        raise RuntimeError("Error code: 429 - rate_limit_exceeded for llama-3.3-70b")
+
+    monkeypatch.setattr(agent_runtime, "run_agent", limited)
+    with TestClient(app) as client:
+        r = client.post("/chat", json={"message": "hi"})
+    assert r.status_code == 429
+    assert "rate limit" in r.json()["detail"]
+
+
+def test_run_agent_retries_malformed_tool_call(monkeypatch):
+    """A transient Groq tool_use_failed 400 is retried once, then succeeds."""
+    calls = {"n": 0}
+
+    class FlakyAgent:
+        def invoke(self, payload, config):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("Error code: 400 - {'code': 'tool_use_failed'}")
+            return {"messages": [type("Msg", (), {"content": "recovered"})()]}
+
+    monkeypatch.setattr(agent_runtime, "get_agent", lambda: (FlakyAgent(), "stub"))
+    monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
+    assert agent_runtime.run_agent("hi", "t-1") == "recovered"
+    assert calls["n"] == 2
+
+
+def test_run_agent_gives_up_after_max_attempts(monkeypatch):
+    class AlwaysBroken:
+        def invoke(self, payload, config):
+            raise RuntimeError("Error code: 400 - {'code': 'tool_use_failed'}")
+
+    monkeypatch.setattr(agent_runtime, "get_agent", lambda: (AlwaysBroken(), "stub"))
+    monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
+    try:
+        agent_runtime.run_agent("hi", "t-1")
+        raise AssertionError("expected the error to propagate")
+    except RuntimeError as exc:
+        assert "tool_use_failed" in str(exc)
+
+
 def test_extract_answer_handles_content_blocks():
     class Msg:
         content = [{"type": "text", "text": "part1 "}, {"type": "text", "text": "part2"}]
