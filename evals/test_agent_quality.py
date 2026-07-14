@@ -1,6 +1,6 @@
 """LLM eval gate: the real deep agent answers a golden dataset in-process and
 an LLM judge scores each answer. The judge auto-selects by available key —
-OpenAI > DeepSeek > Groq (see evals/judge.py; override with EVAL_JUDGE).
+DeepSeek > OpenAI > Groq (see evals/judge.py; override with EVAL_JUDGE).
 
 Metrics per case:
   - AnswerRelevancyMetric (threshold 0.6): did the answer address the question?

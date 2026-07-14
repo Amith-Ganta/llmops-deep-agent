@@ -2,11 +2,15 @@
 
 DeepEval's LLM-judged metrics default to OpenAI; this wrapper routes judging
 through any LangChain chat model instead. The judge provider is picked from
-whichever API key is configured, in order of judge quality:
+whichever API key is configured:
 
-    OPENAI_API_KEY  -> openai:gpt-4o-mini
     DEEPSEEK_API_KEY-> deepseek:deepseek-chat
+    OPENAI_API_KEY  -> openai:gpt-4o-mini
     GROQ_API_KEY    -> groq:llama-3.3-70b-versatile   (fallback)
+
+DeepSeek ranks first: gpt-4o-mini's AnswerRelevancy statement decomposition
+consistently marks the elaborations in list-style answers as irrelevant
+(scoring ~0.2 on correct answers); deepseek-chat judges them correctly.
 
 Set EVAL_JUDGE (e.g. "openai:gpt-4o") to override the auto-selection.
 """
@@ -19,8 +23,8 @@ from deepeval.models import DeepEvalBaseLLM
 from langchain.chat_models import init_chat_model
 
 _JUDGE_BY_KEY = [
-    ("OPENAI_API_KEY", "openai:gpt-4o-mini"),
     ("DEEPSEEK_API_KEY", "deepseek:deepseek-chat"),
+    ("OPENAI_API_KEY", "openai:gpt-4o-mini"),
     ("GROQ_API_KEY", "groq:llama-3.3-70b-versatile"),
 ]
 

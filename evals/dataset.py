@@ -11,16 +11,17 @@ GOLDEN_CASES = [
         "input": "What are the four pillars of a deep agent? Answer briefly.",
         "expected_output": (
             "The four pillars of a deep agent are: (1) planning, e.g. a to-do/"
-            "write_todos tool to break work into steps; (2) context engineering, "
-            "e.g. an AGENTS.md file of instructions and memory; (3) subagents for "
-            "delegating isolated tasks; and (4) a filesystem/backend for storing "
-            "state and files."
+            "write_todos tool to break work into steps; (2) subagents for "
+            "delegating isolated tasks in their own context; (3) filesystem "
+            "access for offloading state and intermediate results out of the "
+            "context window; and (4) a detailed system prompt with instructions "
+            "for using the other pillars (context engineering)."
         ),
         "expected_facts": [
-            "planning (a todo tool such as write_todos)",
-            "context engineering (AGENTS.md instructions/memory)",
-            "subagents (task delegation)",
-            "filesystem or backend access (state/file storage)",
+            "planning (a todo/task list tool such as write_todos)",
+            "subagents (delegation with isolated context)",
+            "filesystem access (context offloading / storing state and files)",
+            "a detailed system prompt (context engineering / instructions)",
         ],
     },
     {

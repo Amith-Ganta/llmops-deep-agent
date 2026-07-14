@@ -111,7 +111,7 @@ two metrics:
 | `GEval` "Correctness" | 0.5 | Does it contain the expected facts (per-case criteria)? |
 
 The judge is a custom `DeepEvalBaseLLM` wrapper (`evals/judge.py`) that auto-selects the best
-provider from the keys available — **OpenAI `gpt-4o-mini` > DeepSeek `deepseek-chat` > Groq
+provider from the keys available — **DeepSeek `deepseek-chat` > OpenAI `gpt-4o-mini` > Groq
 `llama-3.3-70b-versatile`** (override with `EVAL_JUDGE=provider:model`). Evals run with web
 search and subagents disabled so scores measure the model + prompt, not Tavily.
 
