@@ -39,12 +39,26 @@ A research-style deep agent with:
 |---|---|---|
 | `/health` | GET | Liveness — process is up, never touches the LLM |
 | `/ready` | GET | Readiness — agent graph built successfully |
-| `/info` | GET | Running config (model, backend, tracing on/off) |
-| `/chat` | POST | One agent turn: `{"message": "...", "thread_id": "optional"}` → `{"response", "thread_id", "latency_ms", "trace_id"}` |
+| `/info` | GET | Running config + the pickable `available_models` / `available_backends` lists |
+| `/chat` | POST | One agent turn: `{"message": "...", "thread_id"?, "model"?, "backend"?}` → `{"response", "thread_id", "latency_ms", "trace_id", "model", "backend"}` |
 | `/docs` | GET | OpenAPI UI |
 
 Same `thread_id` = same conversation (LangGraph checkpointer). The returned `trace_id` links the
 turn to its Langfuse trace.
+
+`model` and `backend` are optional per-request overrides, validated against the `/info` lists.
+Groq's free-tier rate limits are **per model**, so switching model when one hits its daily token
+cap is a real workaround, not just a preference. `backend` picks one of the three deepagents
+memory types:
+
+| Backend | Agent files live in… | Survives restart | Shared across threads |
+|---|---|---|---|
+| `StateBackend` | the conversation state | no | no |
+| `FilesystemBackend` | real files under `workspace/` | yes | yes |
+| `StoreBackend` | a LangGraph store (AGENTS.md pre-seeded) | no | yes |
+
+Each `(model, backend)` combo gets its own agent instance and checkpointer, so conversation
+history is kept per combo.
 
 ## Quickstart
 
@@ -78,7 +92,9 @@ make frontend               # installs streamlit + requests, serves on :8501
 
 Point the sidebar's **API URL** at wherever the service is listening (`http://localhost:8000`
 for local/Docker, `http://localhost:8080` through the kind port-forward). The sidebar shows the
-service's live `/health`, `/ready`, and `/info` state; every answer displays its latency and
+service's live `/health`, `/ready`, and `/info` state, plus **🧠 Model** and **💾 Memory**
+dropdowns (populated from `/info`) to switch the LLM and the deepagents memory backend per
+conversation; every answer displays its latency, the model/backend that produced it, and its
 Langfuse trace ID. The UI holds no secrets and never touches the LLM directly — it is a pure
 HTTP client, so the API stays the single deployable unit.
 
@@ -151,7 +167,8 @@ All knobs are env vars (12-factor), defaults in [app/settings.py](app/settings.p
 | `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_BASE_URL` | — | tracing (off if unset) |
 | `DEEPAGENT_MODEL` | `groq:llama-3.3-70b-versatile` | main agent model |
 | `SUBAGENT_MODEL` | `groq:llama-3.1-8b-instant` | research subagent model |
-| `DEEPAGENT_BACKEND` | `StateBackend` | agent file system: `StateBackend` \| `FilesystemBackend` \| `CompositeBackend` |
+| `DEEPAGENT_BACKEND` | `StateBackend` | default memory type: `StateBackend` \| `FilesystemBackend` \| `StoreBackend` |
+| `AVAILABLE_MODELS` | 6 Groq models | comma-separated whitelist clients may pick from per request |
 | `ENABLE_WEB_SEARCH` / `ENABLE_SUBAGENTS` | `true` | feature flags |
 | `EAGER_INIT` | `true` | build the agent at startup (readiness gate) |
 | `SYSTEM_PROMPT` | research assistant | override the agent's instructions |

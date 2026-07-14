@@ -35,12 +35,23 @@ def api_get(base_url: str, path: str) -> tuple[dict | None, str | None]:
         return None, str(exc)
 
 
-def api_chat(base_url: str, message: str, thread_id: str) -> tuple[dict | None, str | None]:
+def api_chat(
+    base_url: str,
+    message: str,
+    thread_id: str,
+    model: str | None = None,
+    backend: str | None = None,
+) -> tuple[dict | None, str | None]:
     """POST /chat. Returns (payload, error)."""
+    body: dict[str, Any] = {"message": message, "thread_id": thread_id}
+    if model:
+        body["model"] = model
+    if backend:
+        body["backend"] = backend
     try:
         resp = requests.post(
             f"{base_url.rstrip('/')}/chat",
-            json={"message": message, "thread_id": thread_id},
+            json=body,
             timeout=CHAT_TIMEOUT_S,
         )
         resp.raise_for_status()
@@ -67,8 +78,15 @@ def init_state() -> None:
     st.session_state.setdefault("thread_id", f"ui-{uuid.uuid4().hex[:8]}")
 
 
+MEMORY_HELP = {
+    "StateBackend": "Ephemeral — agent files live inside the conversation state, gone on restart.",
+    "FilesystemBackend": "Persistent — agent files are real files on the server's disk (workspace/).",
+    "StoreBackend": "Cross-thread — a LangGraph store shared by all threads of this combo.",
+}
+
+
 # ── Sidebar ──────────────────────────────────────────────────────────────────
-def render_sidebar() -> str:
+def render_sidebar() -> tuple[str, str | None, str | None]:
     with st.sidebar:
         st.title("⚙️ Service")
 
@@ -85,12 +103,30 @@ def render_sidebar() -> str:
             st.error(f"API unreachable: {health_err}", icon="❌")
 
         info, _ = api_get(api_url, "/info")
+        model = backend = None
         if info:
+            models = info.get("available_models") or [info.get("model")]
+            backends = info.get("available_backends") or [info.get("backend")]
+
+            st.subheader("🧠 Model")
+            model = st.selectbox(
+                "LLM", models,
+                index=models.index(info.get("model")) if info.get("model") in models else 0,
+                help="Groq rate limits are per model — every entry is a separate daily token bucket.",
+            )
+
+            st.subheader("💾 Memory")
+            backend = st.selectbox(
+                "Agent memory backend", backends,
+                index=backends.index(info.get("backend")) if info.get("backend") in backends else 0,
+                help="How the agent's virtual file system is stored.",
+            )
+            st.caption(MEMORY_HELP.get(backend, ""))
+            st.caption("Each model + memory combo keeps its own conversation history.")
+
             st.subheader("🛰️ Live config")
             st.markdown(
-                f"- **Model:** `{info.get('model')}`\n"
                 f"- **Subagent:** `{info.get('subagent_model')}`\n"
-                f"- **Backend:** `{info.get('backend')}`\n"
                 f"- **Web search:** {'on' if info.get('web_search') else 'off'}\n"
                 f"- **Subagents:** {'on' if info.get('subagents') else 'off'}\n"
                 f"- **Langfuse tracing:** {'on' if info.get('langfuse_tracing') else 'off'}"
@@ -121,7 +157,7 @@ def render_sidebar() -> str:
             "Frontend → FastAPI → deep agent (Groq) → Langfuse traces. "
             "[Repo](https://github.com/Amith-Ganta/llmops-deep-agent)"
         )
-    return api_url
+    return api_url, model, backend
 
 
 # ── Feature cards ─────────────────────────────────────────────────────────────
@@ -145,13 +181,15 @@ def render_meta(meta: dict[str, Any] | None) -> None:
     if not meta:
         return
     parts = [f"⏱️ {meta['latency_ms']:,} ms"] if meta.get("latency_ms") is not None else []
+    if meta.get("model"):
+        parts.append(f"🧠 `{meta['model']}` · 💾 {meta.get('backend', '?')}")
     if meta.get("trace_id"):
         parts.append(f"🔍 trace `{meta['trace_id']}`")
     if parts:
         st.caption(" · ".join(parts))
 
 
-def render_chat(api_url: str) -> None:
+def render_chat(api_url: str, model: str | None, backend: str | None) -> None:
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -167,14 +205,19 @@ def render_chat(api_url: str) -> None:
 
     with st.chat_message("assistant"):
         with st.spinner("Agent thinking…"):
-            payload, err = api_chat(api_url, prompt, st.session_state.thread_id)
+            payload, err = api_chat(api_url, prompt, st.session_state.thread_id, model, backend)
 
         if err:
             st.error(err)
             st.session_state.messages.append({"role": "assistant", "content": f"⚠️ {err}", "meta": None})
             return
 
-        meta = {"latency_ms": payload.get("latency_ms"), "trace_id": payload.get("trace_id")}
+        meta = {
+            "latency_ms": payload.get("latency_ms"),
+            "trace_id": payload.get("trace_id"),
+            "model": payload.get("model"),
+            "backend": payload.get("backend"),
+        }
         st.markdown(payload["response"])
         render_meta(meta)
         st.session_state.messages.append({"role": "assistant", "content": payload["response"], "meta": meta})
@@ -185,7 +228,7 @@ def main() -> None:
     st.set_page_config(page_title=APP_TITLE, page_icon=APP_ICON, layout="wide")
     init_state()
 
-    api_url = render_sidebar()
+    api_url, model, backend = render_sidebar()
 
     st.title(f"{APP_ICON} {APP_TITLE}")
     st.caption(
@@ -194,7 +237,7 @@ def main() -> None:
 
     render_feature_cards()
     st.divider()
-    render_chat(api_url)
+    render_chat(api_url, model, backend)
 
 
 if __name__ == "__main__":

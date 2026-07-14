@@ -47,6 +47,8 @@ app = FastAPI(
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     thread_id: str | None = Field(default=None, max_length=128)
+    model: str | None = Field(default=None, max_length=128)
+    backend: str | None = Field(default=None, max_length=64)
 
 
 class ChatResponse(BaseModel):
@@ -54,6 +56,8 @@ class ChatResponse(BaseModel):
     thread_id: str
     latency_ms: int
     trace_id: str | None = None
+    model: str
+    backend: str
 
 
 @app.get("/health")
@@ -77,6 +81,8 @@ def info() -> dict:
         "model": settings.MODEL,
         "subagent_model": settings.SUBAGENT_MODEL,
         "backend": settings.BACKEND,
+        "available_models": settings.AVAILABLE_MODELS,
+        "available_backends": settings.AVAILABLE_BACKENDS,
         "web_search": settings.ENABLE_WEB_SEARCH,
         "subagents": settings.ENABLE_SUBAGENTS,
         "langfuse_tracing": langfuse_enabled(),
@@ -85,10 +91,23 @@ def info() -> dict:
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(request: ChatRequest) -> ChatResponse:
+    model = request.model or settings.MODEL
+    backend = request.backend or settings.BACKEND
+    if model not in settings.AVAILABLE_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown model {model!r} — available: {settings.AVAILABLE_MODELS}",
+        )
+    if backend not in settings.AVAILABLE_BACKENDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown backend {backend!r} — available: {settings.AVAILABLE_BACKENDS}",
+        )
+
     thread_id = request.thread_id or uuid.uuid4().hex
     started = time.perf_counter()
     try:
-        answer = agent_runtime.run_agent(request.message, thread_id)
+        answer = agent_runtime.run_agent(request.message, thread_id, model, backend)
     except HTTPException:
         raise
     except Exception as exc:
@@ -104,4 +123,6 @@ def chat(request: ChatRequest) -> ChatResponse:
         thread_id=thread_id,
         latency_ms=int((time.perf_counter() - started) * 1000),
         trace_id=current_trace_id(),
+        model=model,
+        backend=backend,
     )

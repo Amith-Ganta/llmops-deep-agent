@@ -7,8 +7,14 @@ from app.main import app
 
 
 def make_client(monkeypatch, answer="stubbed answer"):
-    monkeypatch.setattr(agent_runtime, "run_agent", lambda message, thread_id: answer)
-    monkeypatch.setattr(agent_runtime, "get_agent", lambda: (object(), "stub agent"))
+    monkeypatch.setattr(
+        agent_runtime, "run_agent",
+        lambda message, thread_id, model=None, backend=None: answer,
+    )
+    monkeypatch.setattr(
+        agent_runtime, "get_agent",
+        lambda model=None, backend=None: (object(), "stub agent"),
+    )
     return TestClient(app)
 
 
@@ -57,8 +63,42 @@ def test_chat_rejects_empty_message(monkeypatch):
     assert r.status_code == 422
 
 
+def test_info_exposes_choices(monkeypatch):
+    with make_client(monkeypatch) as client:
+        body = client.get("/info").json()
+    assert isinstance(body["available_models"], list) and body["available_models"]
+    assert body["model"] in body["available_models"]
+    assert set(body["available_backends"]) >= {"StateBackend", "FilesystemBackend", "StoreBackend"}
+
+
+def test_chat_echoes_model_and_backend(monkeypatch):
+    with make_client(monkeypatch) as client:
+        r = client.post(
+            "/chat",
+            json={"message": "hi", "model": "groq:llama-3.1-8b-instant", "backend": "StoreBackend"},
+        )
+    body = r.json()
+    assert r.status_code == 200
+    assert body["model"] == "groq:llama-3.1-8b-instant"
+    assert body["backend"] == "StoreBackend"
+
+
+def test_chat_rejects_unknown_model(monkeypatch):
+    with make_client(monkeypatch) as client:
+        r = client.post("/chat", json={"message": "hi", "model": "openai:gpt-99"})
+    assert r.status_code == 400
+    assert "unknown model" in r.json()["detail"]
+
+
+def test_chat_rejects_unknown_backend(monkeypatch):
+    with make_client(monkeypatch) as client:
+        r = client.post("/chat", json={"message": "hi", "backend": "RedisBackend"})
+    assert r.status_code == 400
+    assert "unknown backend" in r.json()["detail"]
+
+
 def test_chat_agent_failure_is_500(monkeypatch):
-    def boom(message, thread_id):
+    def boom(message, thread_id, model=None, backend=None):
         raise RuntimeError("model exploded")
 
     monkeypatch.setattr(agent_runtime, "run_agent", boom)
@@ -69,7 +109,7 @@ def test_chat_agent_failure_is_500(monkeypatch):
 
 
 def test_chat_rate_limit_is_429(monkeypatch):
-    def limited(message, thread_id):
+    def limited(message, thread_id, model=None, backend=None):
         raise RuntimeError("Error code: 429 - rate_limit_exceeded for llama-3.3-70b")
 
     monkeypatch.setattr(agent_runtime, "run_agent", limited)
@@ -90,7 +130,9 @@ def test_run_agent_retries_malformed_tool_call(monkeypatch):
                 raise RuntimeError("Error code: 400 - {'code': 'tool_use_failed'}")
             return {"messages": [type("Msg", (), {"content": "recovered"})()]}
 
-    monkeypatch.setattr(agent_runtime, "get_agent", lambda: (FlakyAgent(), "stub"))
+    monkeypatch.setattr(
+        agent_runtime, "get_agent", lambda model=None, backend=None: (FlakyAgent(), "stub")
+    )
     monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
     assert agent_runtime.run_agent("hi", "t-1") == "recovered"
     assert calls["n"] == 2
@@ -101,7 +143,9 @@ def test_run_agent_gives_up_after_max_attempts(monkeypatch):
         def invoke(self, payload, config):
             raise RuntimeError("Error code: 400 - {'code': 'tool_use_failed'}")
 
-    monkeypatch.setattr(agent_runtime, "get_agent", lambda: (AlwaysBroken(), "stub"))
+    monkeypatch.setattr(
+        agent_runtime, "get_agent", lambda model=None, backend=None: (AlwaysBroken(), "stub")
+    )
     monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
     try:
         agent_runtime.run_agent("hi", "t-1")
