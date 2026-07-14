@@ -39,6 +39,12 @@ autoscaling:
   targetCPUUtilizationPercentage: 70
 
 probes:
+  # EAGER_INIT builds the agent graph before uvicorn answers, so give the
+  # container a startup window before liveness starts counting failures.
+  startup:
+    path: /health
+    periodSeconds: 5
+    failureThreshold: 24   # up to 2 min of warmup
   liveness:
     path: /health
     initialDelaySeconds: 10
