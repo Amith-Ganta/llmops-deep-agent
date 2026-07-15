@@ -1,0 +1,55 @@
+{{- if .Values.frontend.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "deep-agent.fullname" . }}-frontend
+  labels:
+    {{- include "deep-agent.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      # Distinct name label — must never match the API Service's selector,
+      # or API traffic would be routed to the Streamlit pod.
+      app.kubernetes.io/name: {{ include "deep-agent.name" . }}-frontend
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "deep-agent.name" . }}-frontend
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
+          imagePullPolicy: {{ .Values.frontend.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8501
+              protocol: TCP
+          env:
+            # Server-side URL: Streamlit calls the API over the cluster
+            # network, independent of however the API is exposed externally.
+            - name: DEEPAGENT_API_URL
+              value: "http://{{ include "deep-agent.fullname" . }}:{{ .Values.service.port }}"
+          livenessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /_stcore/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+{{- end }}

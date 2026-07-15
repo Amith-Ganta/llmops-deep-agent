@@ -27,8 +27,9 @@ internet ──► ELB ──► Service ──► FastAPI (app/) ──► deep
                                               Langfuse traces
 ```
 
-> **Live:** http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com/docs
-> — image `amith98480/llmops-deep-agent` (Docker Hub, mirrored from GHCR, pinned by git SHA)
+> **Live UI (Streamlit):** http://ac92bf82396074d1c9eea748febd1e3e-2038085742.us-east-1.elb.amazonaws.com
+> **Live API:** http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com/docs
+> — images `amith98480/llmops-deep-agent` + `-frontend` (Docker Hub, mirrored from GHCR, pinned by git SHA)
 
 ## What the agent is
 
@@ -192,9 +193,15 @@ HPA 1→10 at 50 %, image pinned to a git SHA).
 ## Production deployment (AWS EKS)
 
 The same chart runs live on **EKS** (`deep-agents-cluster`, us-east-1, Kubernetes 1.35, managed
-nodegroup of t3.small), exposed through a classic ELB:
+nodegroup of t3.small), exposed through classic ELBs:
 
-**http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com** (`/docs` for the OpenAPI UI)
+- **Chat UI (Streamlit):** **http://ac92bf82396074d1c9eea748febd1e3e-2038085742.us-east-1.elb.amazonaws.com**
+- **API:** **http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com** (`/docs` for the OpenAPI UI)
+
+The frontend runs as its own Deployment + Service from `frontend/Dockerfile` and reaches the API
+via in-cluster DNS (`http://<release>-deep-agent:80`), so the UI never depends on the API's
+external hostname. Its pods carry a distinct `app.kubernetes.io/name` label — they must never
+match the API Service's selector, or `/chat` traffic would be routed to Streamlit.
 
 ```bash
 curl -X POST http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com/chat \

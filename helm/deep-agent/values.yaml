@@ -39,6 +39,27 @@ autoscaling:
   maxReplicas: 3
   targetCPUUtilizationPercentage: 70
 
+# Streamlit UI (frontend/app.py) as its own Deployment + Service. It reaches
+# the API via in-cluster DNS set by the template. Local/kind profile keeps it
+# ClusterIP (port-forward 8501); the EKS release overrides type: LoadBalancer.
+frontend:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: amith98480/llmops-deep-agent-frontend
+    tag: latest
+    pullPolicy: Always
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 384Mi
+
 probes:
   # EAGER_INIT builds the agent graph before uvicorn answers, so give the
   # container a startup window before liveness starts counting failures.

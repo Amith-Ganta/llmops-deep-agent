@@ -86,3 +86,13 @@ jobs:
           tags: |
             ${{ steps.img.outputs.name }}:${{ github.sha }}
             ${{ steps.img.outputs.name }}:latest
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.img.outputs.name }}-frontend:${{ github.sha }}
+            ${{ steps.img.outputs.name }}-frontend:latest
