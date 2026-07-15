@@ -8,21 +8,27 @@ A production-style LLMOps pipeline around a **deep agent** (planning + subagents
 - **Serve** — FastAPI service with liveness/readiness probes and per-thread conversations
 - **Observe** — every agent turn traced end-to-end in **Langfuse** (LLM calls, tool calls, latency, token usage)
 - **Evaluate** — **DeepEval** LLM-as-judge quality gate (answer relevancy + correctness) wired into CI
-- **Ship** — Docker (non-root, 398 MB) → GitHub Actions (lint → test → eval gate → GHCR publish) → Helm chart on Kubernetes with HPA
+- **Ship** — Docker (non-root, 398 MB) → GitHub Actions (lint → test → eval gate → GHCR + Docker Hub) → Helm chart, **live on AWS EKS** behind a public LoadBalancer, with HPA + Cluster Autoscaler
+- **Survive** — automatic **DeepSeek fallback** when the primary provider is rate-limited or down (verified live in production, twice)
 
 ```
-        ┌────────────────────── Kubernetes (kind / EKS) ───────────────────────┐
-        │  ConfigMap ──┐                                          ┌─ HPA 1→3   │
-        │  Secret ─────┤                                          │  (cpu 70%) │
-client ──► Service ────► FastAPI (app/) ──► deep agent (core/)  ◄─┘            │
-        │              /health /ready /chat   │        │                       │
-        └──────────────────────────────────────┼────────┼───────────────────────┘
-                                               │        │
-                                     Groq llama-3.3-70b │ Tavily web search
-                                     (subagents: 8b)    │ + skills/ + AGENTS.md
-                                               │
-                                        Langfuse traces
+        ┌───────────────── AWS EKS (deep-agents-cluster, 2× t3.small) ─────────────────┐
+        │  Secret (envFrom) ──┐                                     ┌─ HPA 1→10        │
+        │  chart config: ─────┤                                     │  (cpu 50%)       │
+internet ──► ELB ──► Service ──► FastAPI (app/) ──► deep agent  ◄───┤                  │
+        │  (LoadBalancer)     /health /ready /chat   │       │      └─ Cluster         │
+        └────────────────────────────────────────────┼───────┼──────── Autoscaler ─────┘
+                                                     │       │
+                                  Groq llama-3.3-70b │       │ Tavily web search
+                                  (subagent: 20b)    │       │ + skills/ + AGENTS.md
+                                          on outage ─┤
+                                  DeepSeek deepseek-chat
+                                                     │
+                                              Langfuse traces
 ```
+
+> **Live:** http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com/docs
+> — image `amith98480/llmops-deep-agent` (Docker Hub, mirrored from GHCR, pinned by git SHA)
 
 ## What the agent is
 
@@ -61,6 +67,27 @@ offered. `backend` picks one of the three deepagents memory types:
 
 Each `(model, backend)` combo gets its own agent instance and checkpointer, so conversation
 history is kept per combo.
+
+## Provider fallback (DeepSeek)
+
+If the primary model's provider is **unresponsive** — rate limit (413/429), 5xx, timeout, or
+connection failure — the turn is retried once on `FALLBACK_MODEL` (default `deepseek:deepseek-chat`
+when `DEEPSEEK_API_KEY` is set). The classifier ([app/agent_runtime.py](app/agent_runtime.py))
+only reroutes on *provider outage* signatures, never on our own bad requests, and the response
+JSON's `"model"` field always reports which model actually answered, so fallbacks are visible to
+clients and in Langfuse traces.
+
+DeepSeek was chosen deliberately: it is a **different provider**, so a Groq-wide outage or an
+exhausted Groq quota cannot take the fallback down with it. Both failure modes have been observed
+live in production:
+
+1. **413 TPM** — the agent's prompt (system prompt + tool schemas) is ~8.2k tokens; on a model
+   with an 8k tokens-per-minute cap every call is rejected before it starts.
+2. **429 TPD** — the daily 100k-token budget ran out mid-day; DeepSeek served the traffic until
+   the rolling window recovered.
+
+In both cases the pod logged `Primary model ... unresponsive ... falling back to
+deepseek:deepseek-chat` and the user got an answer instead of an error.
 
 ## Quickstart
 
@@ -159,6 +186,46 @@ kubectl create secret generic deep-agent-secrets --from-env-file=.env
 helm upgrade --install deep-agent helm/deep-agent
 ```
 
+These are the local/kind defaults; the EKS release below overrides them (LoadBalancer service,
+HPA 1→10 at 50 %, image pinned to a git SHA).
+
+## Production deployment (AWS EKS)
+
+The same chart runs live on **EKS** (`deep-agents-cluster`, us-east-1, Kubernetes 1.35, managed
+nodegroup of t3.small), exposed through a classic ELB:
+
+**http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com** (`/docs` for the OpenAPI UI)
+
+```bash
+curl -X POST http://a2e22fecbf11e4e7cafc556a913d4b32-1236537386.us-east-1.elb.amazonaws.com/chat \
+  -H "Content-Type: application/json" -d '{"message":"What is RAG?"}'
+```
+
+How the production release differs from a laptop deploy — each of these is a deliberate
+operational choice:
+
+- **Immutable image tags.** The Deployment pins `amith98480/llmops-deep-agent:<git-sha>` with
+  `pullPolicy: IfNotPresent` — never `latest` + `Always`. Rollbacks are exact and "what is
+  running?" has exactly one answer. Images are built once in CI (GHCR) and mirrored to Docker Hub
+  with `docker buildx imagetools create` (registry-to-registry, no local pull).
+- **No config drift.** All non-secret config (model choices etc.) lives in a `config:` map in
+  `values.yaml`, rendered into env vars by a template `range` loop; secrets arrive via
+  `envFrom: secretRef`, so new secret keys reach the pod without template edits. Nothing is ever
+  `kubectl set env`-ed by hand — the chart is the single source of truth and `helm upgrade`
+  reconciles everything.
+- **Model policy from rate-limit math.** Groq free-tier limits are per model: the agent's prompt
+  is ~8.2k tokens, so the primary must be a model whose TPM cap fits it —
+  `llama-3.3-70b-versatile` (12k TPM) works, `gpt-oss-120b` (8k TPM) can never serve a single
+  call. The 100k TPD cap ≈ 9–12 agent turns/day, after which the DeepSeek fallback takes over.
+- **Autoscaling at both layers.** HPA (1→10 replicas at 50 % CPU — load-tested: scaled 1→6 under
+  synthetic load) handles pod scaling; **Cluster Autoscaler** (installed with IRSA via an OIDC
+  provider + a scoped IAM policy, ASG auto-discovery) adds nodes when pods go Pending.
+- **Right-sizing evidence.** Fairwinds **VPA in recommender-only mode + Goldilocks** report actual
+  usage (~15m CPU / ~121Mi) vs requests (200m / 256Mi) — headroom is deliberate; HPA owns replica
+  count, so the VPA updater stays off (the two fight over the same signal otherwise).
+- **Probes split by meaning.** Liveness `/health` never touches the LLM (a provider outage must
+  not restart pods); readiness `/ready` gates on the agent graph being built.
+
 ## Configuration
 
 All knobs are env vars (12-factor), defaults in [app/settings.py](app/settings.py):
@@ -172,6 +239,7 @@ All knobs are env vars (12-factor), defaults in [app/settings.py](app/settings.p
 | `LANGFUSE_SECRET_KEY` / `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_BASE_URL` | — | tracing (off if unset) |
 | `DEEPAGENT_MODEL` | `groq:llama-3.3-70b-versatile` | main agent model |
 | `SUBAGENT_MODEL` | `groq:llama-3.1-8b-instant` | research subagent model |
+| `FALLBACK_MODEL` | `deepseek:deepseek-chat` if `DEEPSEEK_API_KEY` set, else off | one retry on this model when the primary provider is unresponsive |
 | `DEEPAGENT_BACKEND` | `StateBackend` | default memory type: `StateBackend` \| `FilesystemBackend` \| `StoreBackend` |
 | `AVAILABLE_MODELS` | 6 Groq models + key-gated OpenAI/DeepSeek | comma-separated whitelist clients may pick from per request |
 | `ENABLE_WEB_SEARCH` / `ENABLE_SUBAGENTS` | `true` | feature flags |
@@ -195,12 +263,21 @@ k8s/        kind cluster config
 
 ## Roadmap
 
-- **Phase 2** — Terraform → EKS (managed node group, ECR, IRSA), remote state
+- ~~EKS (managed node group, IRSA, Cluster Autoscaler)~~ — **done, live** (see Production deployment)
+- Terraform for the cluster + ECR (currently eksctl/CLI-provisioned)
 - Prometheus `/metrics` + Grafana dashboard
 - Streaming responses (SSE) from the agent graph
 
 ## Notes on free-tier limits
 
-Groq free tier caps `llama-3.3-70b-versatile` at **100k tokens/day**; one deep-agent turn costs
-~10k tokens (the agent's system prompt is large), and a full eval run ~40–50k including judge
-calls. Budget accordingly or upgrade the Groq tier before running evals repeatedly.
+Groq free-tier limits are **per model** and come in two flavors that fail differently:
+
+- **TPM (tokens/minute)** rejects a single oversized request with **413**. The agent's prompt
+  (system prompt + tool schemas) is ~8.2k tokens, so any model with an 8k TPM cap (e.g.
+  `gpt-oss-120b`) can never serve this agent at all — pick primaries whose TPM cap exceeds the
+  prompt (`llama-3.3-70b-versatile`: 12k).
+- **TPD (tokens/day)** returns **429** once the rolling daily budget is spent.
+  `llama-3.3-70b-versatile` gets 100k/day; one agent turn costs ~10k, a full eval run ~40–50k
+  including judge calls — that's ~9–12 turns/day before the DeepSeek fallback takes over.
+
+Budget accordingly or upgrade the Groq tier before running evals repeatedly.
