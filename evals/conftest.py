@@ -44,7 +44,10 @@ def agent_answer():
         last_err = None
         for attempt in range(3):  # Groq tool_use_failed is transient; retry
             try:
-                return run_agent(question, thread_id=f"eval-{abs(hash(question)) % 10**8}-{attempt}")
+                answer, _model = run_agent(
+                    question, thread_id=f"eval-{abs(hash(question)) % 10**8}-{attempt}"
+                )
+                return answer
             except Exception as err:  # noqa: BLE001
                 last_err = err
         raise last_err

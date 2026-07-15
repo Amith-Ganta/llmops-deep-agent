@@ -80,6 +80,7 @@ def info() -> dict:
         "version": settings.APP_VERSION,
         "model": settings.MODEL,
         "subagent_model": settings.SUBAGENT_MODEL,
+        "fallback_model": settings.FALLBACK_MODEL or None,
         "backend": settings.BACKEND,
         "available_models": settings.AVAILABLE_MODELS,
         "available_backends": settings.AVAILABLE_BACKENDS,
@@ -107,7 +108,7 @@ def chat(request: ChatRequest) -> ChatResponse:
     thread_id = request.thread_id or uuid.uuid4().hex
     started = time.perf_counter()
     try:
-        answer = agent_runtime.run_agent(request.message, thread_id, model, backend)
+        answer, model_used = agent_runtime.run_agent(request.message, thread_id, model, backend)
     except HTTPException:
         raise
     except Exception as exc:
@@ -123,6 +124,6 @@ def chat(request: ChatRequest) -> ChatResponse:
         thread_id=thread_id,
         latency_ms=int((time.perf_counter() - started) * 1000),
         trace_id=current_trace_id(),
-        model=model,
+        model=model_used,
         backend=backend,
     )

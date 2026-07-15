@@ -65,22 +65,23 @@ def extract_answer(result: dict[str, Any]) -> str:
 _TRANSIENT_MARKER = "tool_use_failed"
 _MAX_ATTEMPTS = 2  # each attempt costs real tokens; retry once, then surface
 
+# Error-string markers that mean the *provider* is unresponsive (as opposed to
+# a bad request from us) — these justify rerouting to FALLBACK_MODEL.
+_OUTAGE_MARKERS = (
+    "rate_limit", "rate limit", "error code: 429",
+    "error code: 500", "error code: 502", "error code: 503",
+    "internal server error", "service unavailable", "overloaded",
+    "timeout", "timed out", "connection error", "connection refused",
+)
 
-def run_agent(
-    message: str,
-    thread_id: str,
-    model: str | None = None,
-    backend: str | None = None,
-) -> str:
-    """Invoke the deep agent for one user message on a conversation thread."""
-    agent, _ = get_agent(model, backend)
-    callbacks = [h for h in [get_langfuse_handler()] if h is not None]
-    config: dict[str, Any] = {
-        "configurable": {"thread_id": thread_id},
-        "recursion_limit": settings.RECURSION_LIMIT,
-        "callbacks": callbacks,
-        "metadata": {"langfuse_session_id": thread_id},
-    }
+
+def _provider_outage(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(marker in text for marker in _OUTAGE_MARKERS)
+
+
+def _invoke(agent: Any, message: str, config: dict[str, Any], thread_id: str) -> str:
+    """One agent turn, retrying once on Groq's transient tool_use_failed 400."""
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             result = agent.invoke(
@@ -96,3 +97,39 @@ def run_agent(
                 thread_id, attempt, _MAX_ATTEMPTS,
             )
     raise RuntimeError("unreachable")  # for the type checker
+
+
+def run_agent(
+    message: str,
+    thread_id: str,
+    model: str | None = None,
+    backend: str | None = None,
+) -> tuple[str, str]:
+    """One user message on a conversation thread -> (answer, model that answered).
+
+    If the primary provider is unresponsive (429/5xx/timeout) and
+    FALLBACK_MODEL is configured, the turn is retried once on the fallback.
+    Each (model, backend) agent has its own checkpointer, so a fallback turn
+    starts without the thread's prior history — degraded but alive.
+    """
+    primary = model or settings.MODEL
+    agent, _ = get_agent(primary, backend)
+    callbacks = [h for h in [get_langfuse_handler()] if h is not None]
+    config: dict[str, Any] = {
+        "configurable": {"thread_id": thread_id},
+        "recursion_limit": settings.RECURSION_LIMIT,
+        "callbacks": callbacks,
+        "metadata": {"langfuse_session_id": thread_id},
+    }
+    try:
+        return _invoke(agent, message, config, thread_id), primary
+    except Exception as exc:
+        fallback = settings.FALLBACK_MODEL
+        if not fallback or fallback == primary or not _provider_outage(exc):
+            raise
+        logger.warning(
+            "Primary model %s unresponsive (%s) — falling back to %s (thread=%s).",
+            primary, exc, fallback, thread_id,
+        )
+        fallback_agent, _ = get_agent(fallback, backend)
+        return _invoke(fallback_agent, message, config, thread_id), fallback

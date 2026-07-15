@@ -9,7 +9,10 @@ from app.main import app
 def make_client(monkeypatch, answer="stubbed answer"):
     monkeypatch.setattr(
         agent_runtime, "run_agent",
-        lambda message, thread_id, model=None, backend=None: answer,
+        lambda message, thread_id, model=None, backend=None: (
+            answer,
+            model or agent_runtime.settings.MODEL,
+        ),
     )
     monkeypatch.setattr(
         agent_runtime, "get_agent",
@@ -134,7 +137,8 @@ def test_run_agent_retries_malformed_tool_call(monkeypatch):
         agent_runtime, "get_agent", lambda model=None, backend=None: (FlakyAgent(), "stub")
     )
     monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
-    assert agent_runtime.run_agent("hi", "t-1") == "recovered"
+    answer, _ = agent_runtime.run_agent("hi", "t-1")
+    assert answer == "recovered"
     assert calls["n"] == 2
 
 
@@ -152,6 +156,65 @@ def test_run_agent_gives_up_after_max_attempts(monkeypatch):
         raise AssertionError("expected the error to propagate")
     except RuntimeError as exc:
         assert "tool_use_failed" in str(exc)
+
+
+def test_run_agent_falls_back_to_deepseek_on_outage(monkeypatch):
+    """A 429 from the primary provider reroutes the turn to FALLBACK_MODEL."""
+    class RateLimited:
+        def invoke(self, payload, config):
+            raise RuntimeError("Error code: 429 - rate_limit_exceeded")
+
+    class Healthy:
+        def invoke(self, payload, config):
+            return {"messages": [type("Msg", (), {"content": "deepseek answer"})()]}
+
+    agents = {"groq:primary": RateLimited(), "deepseek:deepseek-chat": Healthy()}
+    monkeypatch.setattr(
+        agent_runtime, "get_agent",
+        lambda model=None, backend=None: (agents[model], "stub"),
+    )
+    monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
+    monkeypatch.setattr(agent_runtime.settings, "FALLBACK_MODEL", "deepseek:deepseek-chat")
+    answer, model_used = agent_runtime.run_agent("hi", "t-1", model="groq:primary")
+    assert answer == "deepseek answer"
+    assert model_used == "deepseek:deepseek-chat"
+
+
+def test_run_agent_no_fallback_when_disabled(monkeypatch):
+    class RateLimited:
+        def invoke(self, payload, config):
+            raise RuntimeError("Error code: 429 - rate_limit_exceeded")
+
+    monkeypatch.setattr(
+        agent_runtime, "get_agent",
+        lambda model=None, backend=None: (RateLimited(), "stub"),
+    )
+    monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
+    monkeypatch.setattr(agent_runtime.settings, "FALLBACK_MODEL", "")
+    try:
+        agent_runtime.run_agent("hi", "t-1")
+        raise AssertionError("expected the 429 to propagate")
+    except RuntimeError as exc:
+        assert "429" in str(exc)
+
+
+def test_run_agent_no_fallback_on_our_own_bad_request(monkeypatch):
+    """A 400-class error is our bug, not an outage — never rerouted."""
+    class BadRequest:
+        def invoke(self, payload, config):
+            raise RuntimeError("Error code: 400 - invalid request payload")
+
+    monkeypatch.setattr(
+        agent_runtime, "get_agent",
+        lambda model=None, backend=None: (BadRequest(), "stub"),
+    )
+    monkeypatch.setattr(agent_runtime, "get_langfuse_handler", lambda: None)
+    monkeypatch.setattr(agent_runtime.settings, "FALLBACK_MODEL", "deepseek:deepseek-chat")
+    try:
+        agent_runtime.run_agent("hi", "t-1")
+        raise AssertionError("expected the 400 to propagate")
+    except RuntimeError as exc:
+        assert "400" in str(exc)
 
 
 def test_extract_answer_handles_content_blocks():

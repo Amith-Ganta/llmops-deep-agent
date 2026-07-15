@@ -22,6 +22,14 @@ APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
 MODEL = os.getenv("DEEPAGENT_MODEL", "groq:llama-3.3-70b-versatile")
 SUBAGENT_MODEL = os.getenv("SUBAGENT_MODEL", "groq:llama-3.1-8b-instant")
 BACKEND = os.getenv("DEEPAGENT_BACKEND", "StateBackend")
+
+# When the primary provider is unresponsive (rate limit, 5xx, timeout), one
+# retry goes through this model instead. DeepSeek is a different provider, so
+# a Groq-wide outage doesn't take it down too. Empty string disables fallback.
+FALLBACK_MODEL = os.getenv(
+    "FALLBACK_MODEL",
+    "deepseek:deepseek-chat" if os.getenv("DEEPSEEK_API_KEY") else "",
+)
 WORKSPACE_ROOT = os.getenv("WORKSPACE_ROOT", "workspace")
 
 # Models the API lets clients pick per request. Groq rate limits are per
