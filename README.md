@@ -88,8 +88,8 @@ flowchart LR
         ELB2 --> SVC[API Service<br/>ClusterIP 80→8000]
         FE -->|in-cluster DNS| SVC
         SVC --> API[FastAPI pods<br/>/health /ready /chat]
-        HPA[HPA 1→10 @ 50% CPU] -.scales.-> API
-        CA[Cluster Autoscaler<br/>IRSA + ASG discovery] -.adds nodes.-> EKS
+        HPA[HPA 1→10 @ 50% CPU] -.scales pods.-> API
+        CA[Cluster Autoscaler<br/>IRSA + ASG discovery] -.adds nodes.-> NG[Managed nodegroup<br/>t3.small ASG]
         SEC[(Secret + ConfigMap<br/>envFrom)] --> API
     end
 
